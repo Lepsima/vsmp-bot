@@ -1,0 +1,12 @@
+services:
+  discord-bot:
+
+    image: discord-bot:latest
+
+    container_name: discord-bot
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./data:/bot/data

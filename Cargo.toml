@@ -1,0 +1,21 @@
+[package]
+name = "discord-bot"
+version = "0.0.1"
+authors = ["Lepsima <lepsima@proton.me>"]
+edition = "2024"
+
+[dependencies]
+serenity = { version = "0.12", features = ["client", "gateway", "model", "cache"] }
+poise = "0.6"
+
+tokio = { version = "1", features = ["full"] }
+
+bollard = "0.21.0"
+craftping = { version = "0.7.0", features = ["async-tokio"] }
+
+dotenvy = "0.15"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+futures-util = "0.3"
