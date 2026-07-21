@@ -1,12 +1,13 @@
 services:
   discord-bot:
-
     image: discord-bot:latest
-
-    container_name: discord-bot
-
+    container_name: vsmp-bot
+    restart: unless-stopped
     env_file:
       - .env
-
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/bot/data
+      - ./config:/bot/config
+      - /var/run/docker.sock:/var/run/docker.sock
