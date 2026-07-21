@@ -135,7 +135,7 @@ fn embed_server_offline() -> CreateEmbed {
 async fn players(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let embed = match get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await {
+    let embed: CreateEmbed = match get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await {
         Some(status) => embed_players_online(&status),
         None => embed_players_offline(),
     };
