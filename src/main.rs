@@ -1,3 +1,5 @@
+mod simple_reply;
+
 use std::{
     collections::HashSet,
     sync::Arc,
@@ -10,6 +12,10 @@ use futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed, Mentionable, RoleId};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
+
+use serenity::{async_trait};
+use serenity::model::channel::Message;
+use serenity::prelude::*;
 
 // ========== CONFIG ==========
 
@@ -361,8 +367,27 @@ struct Handler {
     data: Arc<Data>,
 }
 
-#[serenity::async_trait]
-impl serenity::EventHandler for Handler {
+#[async_trait]
+impl EventHandler for Handler {
+    async fn message(&self, ctx: serenity::Context, msg: Message) {
+        if msg.author.bot {
+            return;
+        }
+
+        let response = simple_reply::get_response(&msg.content);
+
+        if !response.is_some() {
+            // Get advanced reply
+        }
+
+        if response.is_some() {
+            let content = response.unwrap();
+            if let Err(why) = msg.channel_id.say(&ctx.http, content).await {
+                println!("Error sending message: {why:?}");
+            }
+        }
+    }
+
     async fn ready(&self, ctx: serenity::Context, ready: serenity::Ready) {
         info!("Logged in as {}", ready.user.name);
 
@@ -414,10 +439,10 @@ async fn main() {
         })
         .build();
 
-    let intents = serenity::GatewayIntents::GUILDS
-        | serenity::GatewayIntents::GUILD_MEMBERS
-        | serenity::GatewayIntents::GUILD_MESSAGES
-        | serenity::GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MEMBERS
+        | GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = serenity::ClientBuilder::new(token, intents)
         .event_handler(Handler { data: data.clone() })
