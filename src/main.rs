@@ -1,11 +1,13 @@
-mod simple_reply;
+mod message_parser;
+mod config;
+mod balatro;
+mod message_handler;
 
 use std::{
     collections::HashSet,
     sync::Arc,
     time::Duration,
 };
-
 use bollard::{Docker, query_parameters::EventsOptionsBuilder};
 use craftping::tokio::ping;
 use futures_util::StreamExt;
@@ -16,8 +18,7 @@ use tracing::{error, info};
 use serenity::{async_trait};
 use serenity::model::channel::Message;
 use serenity::prelude::*;
-
-// ========== CONFIG ==========
+use crate::config::Dialogue;
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
@@ -25,35 +26,39 @@ const MC_CONTAINER_NAME: &str = "purpur";
 const STATUS_CHANNEL_ID: u64 = 1482111537127620608;
 const ACTIVITY_CHANNEL_ID: u64 = 1482122160930689216;
 
-// ========== SHARED STATE ==========
+struct Color;
+
+impl Color {
+    pub const GREEN: u32 = 0x57F287u32;
+    pub const ORANGE: u32 = 0xFFA500u32;
+    pub const RED: u32 = 0xED4245u32;
+    pub const BLUE: u32 = 0x5865F2u32;
+}
+
+struct Handler {
+    data: Arc<Data>,
+}
 
 struct Data {
     mc_host: String,
     mc_port: u16,
     last_player_set: Mutex<HashSet<String>>,
-    last_activity_message: Mutex<Option<serenity::MessageId>>,
-    notify_role_id: Mutex<Option<RoleId>>,
+    last_activity_message: Mutex<Option<serenity::MessageId>>
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Arc<Data>, Error>;
 
-// ========== MC STATUS ==========
 
 struct McStatus {
     online: usize,
     max: usize,
-    players: Vec<String>,
-    latency_ms: u64,
+    players: Vec<String>
 }
 
-/// Opens a TcpStream and pings the MC server. Returns None if unreachable.
 async fn get_mc_status(host: &str, port: u16) -> Option<McStatus> {
-    let start = std::time::Instant::now();
-    // craftping requires us to open the stream ourselves
     let mut stream = TcpStream::connect((host, port)).await.ok()?;
     let pong = ping(&mut stream, host, port).await.ok()?;
-    let latency_ms = start.elapsed().as_millis() as u64;
 
     let players = pong
         .sample
@@ -65,16 +70,13 @@ async fn get_mc_status(host: &str, port: u16) -> Option<McStatus> {
     Some(McStatus {
         online: pong.online_players,
         max: pong.max_players,
-        players,
-        latency_ms,
+        players
     })
 }
 
-// ========== EMBEDS ==========
-
 fn embed_players_online(status: &McStatus) -> CreateEmbed {
     let description = if status.online == 0 || status.players.is_empty() {
-        "Nobody is online".to_string()
+        Dialogue::SERVER_EMPTY.to_string()
     } else {
         let names = status
             .players
@@ -89,59 +91,48 @@ fn embed_players_online(status: &McStatus) -> CreateEmbed {
     };
 
     let color = if status.online == 0 {
-        0xFFA500u32 // orange
+        Color::ORANGE
     } else {
-        0x57F287 // green
+        Color::GREEN
     };
 
-    CreateEmbed::new()
-        .title("Server is online")
-        .description(description)
-        .footer(serenity::CreateEmbedFooter::new(format!(
-            "Ping: {}ms",
-            status.latency_ms
-        )))
-        .color(color)
-}
-
-fn embed_players_offline() -> CreateEmbed {
-    CreateEmbed::new()
-        .title("Server is offline")
-        .description("Unable to connect to the Minecraft server.")
-        .color(0xED4245u32)
+    create_embed(true, &description, color)
 }
 
 fn embed_server_online(ready: bool) -> CreateEmbed {
     if ready {
-        CreateEmbed::new()
-            .title("Server online")
-            .description("The server is ready.")
-            .color(0x57F287u32)
+        create_embed(true, Dialogue::SERVER_READY, Color::GREEN)
     } else {
-        CreateEmbed::new()
-            .title("Server online")
-            .description(
-                "The server is opening slower than expected, have patience when trying to join.",
-            )
-            .color(0xFFA500u32)
+        create_embed(true, Dialogue::SERVER_NOT_READY, Color::ORANGE)
     }
 }
 
-fn embed_server_offline() -> CreateEmbed {
-    CreateEmbed::new()
-        .title("Server offline")
-        .description("The Minecraft server has shut down.")
-        .color(0xED4245u32)
+fn embed_players_offline() -> CreateEmbed {
+    create_embed(false, Dialogue::UNABLE_TO_CONNECT, Color::RED)
 }
 
-// ========== COMMANDS ==========
+fn embed_server_offline() -> CreateEmbed {
+    create_embed(false, Dialogue::SERVER_DOWN, Color::RED)
+}
 
-/// Displays the active players in the server
+fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
+    let embed = CreateEmbed::new()
+        .description(desc)
+        .color(color);
+
+    if is_online {
+        embed.title(Dialogue::SERVER_ONLINE)
+    } else {
+        embed.title(Dialogue::SERVER_OFFLINE)
+    }
+}
+
 #[poise::command(slash_command)]
 async fn players(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let embed: CreateEmbed = match get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await {
+    let opt_status = get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await;
+    let embed: CreateEmbed = match opt_status {
         Some(status) => embed_players_online(&status),
         None => embed_players_offline(),
     };
@@ -150,74 +141,43 @@ async fn players(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Ping a role when the server is empty (toggle)
 #[poise::command(slash_command, rename = "notify-empty")]
-async fn notify_empty(
-    ctx: Context<'_>,
-    #[description = "Role to ping when the server is empty"] role: serenity::Role,
-) -> Result<(), Error> {
-    let mut notify = ctx.data().notify_role_id.lock().await;
-
-    // Toggle off if same role is set
-    if *notify == Some(role.id) {
-        *notify = None;
-        ctx.say("Notification cancelled.").await?;
-        return Ok(());
-    }
-
-    // Check server is reachable and not already empty
+async fn notify_empty(ctx: Context<'_>) -> Result<(), Error> {
     match get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await {
         None => {
-            ctx.say("Could not connect to the server.").await?;
+            ctx.say(Dialogue::UNABLE_TO_CONNECT).await?;
             return Ok(());
         }
         Some(status) if status.online == 0 => {
-            ctx.say("The server is already empty.").await?;
+            ctx.say(Dialogue::ALREADY_EMPTY).await?;
             return Ok(());
         }
         _ => {}
     }
 
-    *notify = Some(role.id);
-    // role.id implements Mentionable, imported above
-    ctx.say(format!(
-        "I'll ping {} when the server is empty.",
-        role.id.mention()
-    ))
-        .await?;
+    ctx.say(Dialogue::WILL_PING).await?;
     Ok(())
 }
 
-// ========== BACKGROUND TASKS ==========
-
-/// Every 5 minutes: if a notify role is set and server is empty, ping it.
 async fn task_check_empty(ctx: serenity::Context, data: Arc<Data>) {
     loop {
         tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
-        let role_id = *data.notify_role_id.lock().await;
-        let Some(role_id) = role_id else { continue };
-
         match get_mc_status(&data.mc_host, data.mc_port).await {
             Some(status) if status.online == 0 => {
                 let channel = ChannelId::new(STATUS_CHANNEL_ID);
-                if let Err(e) = channel
-                    .say(&ctx, format!("{} The server is now empty.", role_id.mention()))
-                    .await
-                {
+                if let Err(e) = channel.say(&ctx, Dialogue::WHEN_EMPTY).await {
                     error!("Failed to send notify-empty message: {e}");
                 }
-                *data.notify_role_id.lock().await = None;
             }
             None => {
                 error!("notify-empty: could not reach MC server");
             }
-            _ => {} // still players online, keep waiting
+            _ => {}
         }
     }
 }
 
-/// Every 15 minutes: if ≥3 players online and player list changed, post activity embed.
 async fn task_check_players(ctx: serenity::Context, data: Arc<Data>) {
     loop {
         tokio::time::sleep(Duration::from_secs(15 * 60)).await;
@@ -259,12 +219,12 @@ async fn task_check_players(ctx: serenity::Context, data: Arc<Data>) {
             .join("\n");
 
         let embed = CreateEmbed::new()
-            .title("Active session")
+            .title(Dialogue::ACTIVE_SESSION)
             .description(format!(
                 "There are **{}** players online:\n{}",
                 status.online, names
             ))
-            .color(0x5865F2u32);
+            .color(Color::BLUE);
 
         match channel
             .send_message(&ctx, serenity::CreateMessage::new().embed(embed))
@@ -338,7 +298,7 @@ async fn on_mc_start(ctx: serenity::Context, data: Arc<Data>) {
     }
 
     ctx.set_presence(
-        Some(serenity::ActivityData::playing("Server is online")),
+        Some(serenity::ActivityData::playing(Dialogue::SERVER_ONLINE)),
         serenity::OnlineStatus::Online,
     );
 }
@@ -356,15 +316,9 @@ async fn on_mc_stop(ctx: serenity::Context) {
     }
 
     ctx.set_presence(
-        Some(serenity::ActivityData::playing("Server offline")),
+        Some(serenity::ActivityData::playing(Dialogue::SERVER_OFFLINE)),
         serenity::OnlineStatus::DoNotDisturb,
     );
-}
-
-// ========== EVENT HANDLER ==========
-
-struct Handler {
-    data: Arc<Data>,
 }
 
 #[async_trait]
@@ -374,7 +328,8 @@ impl EventHandler for Handler {
             return;
         }
 
-        let response = simple_reply::get_response(&msg.content);
+        /*
+        let response = message_parser::get_response(&msg.content);
 
         if !response.is_some() {
             // Get advanced reply
@@ -386,13 +341,15 @@ impl EventHandler for Handler {
                 println!("Error sending message: {why:?}");
             }
         }
+        */
+
     }
 
     async fn ready(&self, ctx: serenity::Context, ready: serenity::Ready) {
         info!("Logged in as {}", ready.user.name);
 
         ctx.set_presence(
-            Some(serenity::ActivityData::playing("Server starting...")),
+            Some(serenity::ActivityData::playing(Dialogue::SERVER_STARTING)),
             serenity::OnlineStatus::Idle,
         );
 
@@ -420,8 +377,7 @@ async fn main() {
         mc_host: MC_HOST.to_string(),
         mc_port: MC_PORT,
         last_player_set: Mutex::new(HashSet::new()),
-        last_activity_message: Mutex::new(None),
-        notify_role_id: Mutex::new(None),
+        last_activity_message: Mutex::new(None)
     });
 
     let data_clone = data.clone();
