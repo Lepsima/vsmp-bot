@@ -1,24 +1,30 @@
-mod message_parser;
 mod config;
-mod balatro;
 mod message_handler;
+mod message_flagger;
 
 use std::{
     collections::HashSet,
     sync::Arc,
     time::Duration,
 };
+
+use crate::{
+    config::Dialogue,
+    message_handler::handle_message
+};
+
+use serenity::{
+    async_trait,
+    model::channel::Message,
+    prelude::*
+};
+
 use bollard::{Docker, query_parameters::EventsOptionsBuilder};
 use craftping::tokio::ping;
 use futures_util::StreamExt;
-use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed, Mentionable, RoleId};
+use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
-
-use serenity::{async_trait};
-use serenity::model::channel::Message;
-use serenity::prelude::*;
-use crate::config::Dialogue;
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
@@ -324,25 +330,9 @@ async fn on_mc_stop(ctx: serenity::Context) {
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: serenity::Context, msg: Message) {
-        if msg.author.bot {
-            return;
+        if !msg.author.bot {
+            handle_message(ctx, msg).await;
         }
-
-        /*
-        let response = message_parser::get_response(&msg.content);
-
-        if !response.is_some() {
-            // Get advanced reply
-        }
-
-        if response.is_some() {
-            let content = response.unwrap();
-            if let Err(why) = msg.channel_id.say(&ctx.http, content).await {
-                println!("Error sending message: {why:?}");
-            }
-        }
-        */
-
     }
 
     async fn ready(&self, ctx: serenity::Context, ready: serenity::Ready) {

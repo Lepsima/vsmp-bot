@@ -4,9 +4,6 @@ version = "0.0.1"
 authors = ["Lepsima <lepsima@proton.me>"]
 edition = "2024"
 
-[lib]
-name = "vsmp_bot"
-
 [dependencies]
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache"] }
 poise = "0.6"
@@ -22,10 +19,3 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 futures-util = "0.3"
-
-[dev-dependencies]
-criterion = "0.5"
-
-[[bench]]
-name = "mybench"
-harness = false

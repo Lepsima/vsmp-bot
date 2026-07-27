@@ -25,9 +25,12 @@ pub static RESPONSE_TABLE: &[(&str, &str)] = &[
     ("jewish burger", "Jewish burger"),
     ("indelible", "INDELIBLE tomorrow"),
     ("spiffballs", "<@967923910253363201>, Skibidi Spiffballs for 10$."),
-    ("mayo", "Mayo, mmmmmmm~")
+    ("mayo", "Mayo, mmmmmmm~"),
+    ("jade alert", "!!! JADE ALERT !!!"),
+    ("ascii porn", "ASCII- ¿what? 🤨"),
+    ("ascii pron", "ASCII- ¿what? 🤨")
 ];
 
 pub static MISSPELLS_TABLE: &[&str] = &[
-    "lamo", "ahr", "forgor"
+    "lamo", "ahr", "forgor", "qoute", "akward"
 ];

@@ -1,44 +1,35 @@
-use std::sync::LazyLock;
 use crate::config::{MISSPELLS_TABLE, RESPONSE_TABLE};
-use crate::message_parser::{get_quick_message, tokenize, QuickMessage};
+use crate::message_flagger::get_message_flags;
+use serenity::all::Message;
+use serenity::client::Context;
 
-static QUICK_RESPONSE_TABLE: LazyLock<Vec<(Vec<usize>, &str)>> = LazyLock::new(|| {
-    let mut qrt: Vec<(Vec<usize>, &str)> = Vec::new();
+fn catch_error(res: serenity::Result<Message>) {
+    if let Err(why) = res {
+        println!("Error sending message: {why:?}");
+    }
+}
 
-    RESPONSE_TABLE.into_iter().for_each(|response| {
-        qrt.push((tokenize(response.0), response.1));
-    });
+pub async fn handle_message(ctx: Context, msg: Message) {
+    let text_lc = msg.content.to_lowercase();
+    let flags = get_message_flags(&text_lc);
 
-    qrt
-});
-
-pub fn get_response_1(msg: &String) -> Vec<String> {
-    let msg = msg.to_lowercase();
-    let mut vec = vec![];
-
-    for response in RESPONSE_TABLE {
-        if msg.contains(response.0) {
-            vec.push(response.1.to_string());
+    if flags.has_response() {
+        for response in RESPONSE_TABLE {
+            if text_lc.contains(response.0) {
+                let reply = response.1.to_string();
+                catch_error(msg.channel_id.say(&ctx.http, reply).await);
+                return;
+            }
         }
     }
 
-    vec
-}
-
-pub fn get_response_2(msg: &String) -> Vec<String> {
-    let quick_msg = get_quick_message(msg);
-    get_response_3(&quick_msg)
-}
-
-pub fn get_response_3(msg: &QuickMessage) -> Vec<String> {
-    let mut vec = vec![];
-
-
-    for response in QUICK_RESPONSE_TABLE.iter() {
-        if msg.has_ids(&response.0) {
-            vec.push(response.1.to_string());
+    if flags.has_misspell() {
+        for response in MISSPELLS_TABLE {
+            if text_lc.contains(response) {
+                let reply = response.to_string() + " 🥺";
+                catch_error(msg.channel_id.say(&ctx.http, reply).await);
+                return;
+            }
         }
-    };
-
-    vec
+    }
 }
