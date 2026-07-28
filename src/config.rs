@@ -37,9 +37,12 @@ pub static RESPONSE_TABLE: &[(&str, &str)] = &[
     ("free money", "https://cdn.discordapp.com/attachments/1489775819919327352/1531446248966455469/image.png?ex=6a693df6&is=6a67ec76&hm=1d6a9669d426408c7ba7be9ec3b18e715d64239d1d25fdebdec5bfc767b9f8e6&"),
     ("mrbreast", "https://cdn.discordapp.com/attachments/1489775819919327352/1531446248966455469/image.png?ex=6a693df6&is=6a67ec76&hm=1d6a9669d426408c7ba7be9ec3b18e715d64239d1d25fdebdec5bfc767b9f8e6&"),
     ("hotel", "some mf said \"hotel\"")
-
 ];
 
 pub static MISSPELLS_TABLE: &[&str] = &[
     "lamo", "ahr", "forgor", "qoute", "akward", "mincrefart",
+];
+
+pub static JARVIS_RESPONSE_TABLE: &[(&str, &str)] = &[
+    ("do a backflip", "no"),
 ];

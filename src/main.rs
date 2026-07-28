@@ -1,6 +1,7 @@
 mod config;
 mod message_handler;
 mod message_flagger;
+mod cards;
 
 use std::{
     collections::HashSet,
@@ -25,6 +26,7 @@ use futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
+use crate::cards::{Card, Deck};
 use crate::message_handler::catch_msg;
 
 const MC_HOST: &str = "host.docker.internal";
@@ -139,6 +141,11 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
 async fn meme(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
+    let deck = Deck::new();
+    let msg = deck.render_all();
+    ctx.send(poise::CreateReply::default().content(msg)).await?;
+
+    /*
     let number = rand::random_range(1..1380);
 
     let extensions = ["png","jpg","jpeg","mkv","mov","webp","mp4"];
@@ -150,6 +157,8 @@ async fn meme(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     ctx.send(poise::CreateReply::default().content(msg)).await?;
+    */
+
     Ok(())
 }
 
