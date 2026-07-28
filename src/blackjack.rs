@@ -40,7 +40,29 @@ impl BlackJack {
         let pv = &format!("Your hand: [{}]", self.player_hand.value());
         let pr = &self.player_hand.render_max(8);
 
-        format!("{}\n{}\n\n{}\n{}\n", dv, dr, pv, pr)
+        format!("{}\n{}\n{}\n{}\n", dv, dr, pv, pr)
+    }
+
+    pub fn check_end(&mut self) -> &str {
+        let player_value = self.player_hand.value();
+        let dealer_value = self.dealer_hand.value();
+
+        if player_value < 21 && dealer_value < 21 {
+            return "";
+        }
+
+        if (player_value > dealer_value && player_value <= 21) || dealer_value > 21 {
+            // ADD self.player_bet
+            self.is_playing = false;
+            "\n You won!"
+        } else if dealer_value > player_value {
+            // SUBTRACT self.player_bet
+            self.is_playing = false;
+            "\n Dealer won!"
+        } else {
+            self.is_playing = false;
+            "\n Push!"
+        }
     }
 
     pub fn turn(&mut self, action: &str) -> String {
@@ -71,10 +93,9 @@ impl BlackJack {
             },
 
             _ => {
-                output += "Unknown action.";
+                output += "Unknown action.\n";
             }
         }
-
         if is_player_busted {
             self.is_playing = false;
             output += &format!("{}\nYou busted, lost {}€", self.display_state(), self.player_bet);
@@ -92,23 +113,7 @@ impl BlackJack {
         }
 
         output += &self.display_state();
-        let player_value = self.player_hand.value();
-        let dealer_value = self.dealer_hand.value();
-
-        if (player_value > dealer_value && player_value <= 21) || dealer_value > 21 {
-            // ADD self.player_bet
-            self.is_playing = false;
-            output += "\n You won!";
-
-        } else if dealer_value > player_value {
-            // SUBTRACT self.player_bet
-            self.is_playing = false;
-            output += "\n Dealer won!";
-        }else {
-            self.is_playing = false;
-            output += "\n Push!";
-        }
-
+        output += self.check_end();
         output
     }
 }
