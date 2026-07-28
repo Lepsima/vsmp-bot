@@ -398,6 +398,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "poise",
+ "rand 0.10.2",
  "serenity",
  "tokio",
  "tracing",

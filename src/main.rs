@@ -25,6 +25,7 @@ use futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
+use crate::message_handler::catch_msg;
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
@@ -49,7 +50,8 @@ struct Data {
     mc_host: String,
     mc_port: u16,
     last_player_set: Mutex<HashSet<String>>,
-    last_activity_message: Mutex<Option<serenity::MessageId>>
+    last_activity_message: Mutex<Option<serenity::MessageId>>,
+    notify_role: Mutex<bool>,
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -134,6 +136,24 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
 }
 
 #[poise::command(slash_command)]
+async fn meme(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+
+    let number = rand::random_range(1..1380);
+
+    let extensions = ["png","jpg","jpeg","mkv","mov","webp","mp4"];
+    let mut msg = "".to_string();
+
+    for ext in extensions {
+        let meme_link = format!("[\u{2800}](https://memes.colon3.me/{:04}.{})", number, ext);
+        msg += &meme_link;
+    }
+
+    ctx.send(poise::CreateReply::default().content(msg)).await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
 async fn players(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
@@ -149,6 +169,13 @@ async fn players(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, rename = "notify-empty")]
 async fn notify_empty(ctx: Context<'_>) -> Result<(), Error> {
+    let mut notify = ctx.data().notify_role.lock().await;
+
+    if *notify {
+        *notify = false;
+        return Ok(());
+    }
+
     match get_mc_status(&ctx.data().mc_host, ctx.data().mc_port).await {
         None => {
             ctx.say(Dialogue::UNABLE_TO_CONNECT).await?;
@@ -161,6 +188,7 @@ async fn notify_empty(ctx: Context<'_>) -> Result<(), Error> {
         _ => {}
     }
 
+    *notify = true;
     ctx.say(Dialogue::WILL_PING).await?;
     Ok(())
 }
@@ -169,12 +197,18 @@ async fn task_check_empty(ctx: serenity::Context, data: Arc<Data>) {
     loop {
         tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
+        if !*data.notify_role.lock().await {
+            continue;
+        }
+
         match get_mc_status(&data.mc_host, data.mc_port).await {
             Some(status) if status.online == 0 => {
                 let channel = ChannelId::new(STATUS_CHANNEL_ID);
                 if let Err(e) = channel.say(&ctx, Dialogue::WHEN_EMPTY).await {
                     error!("Failed to send notify-empty message: {e}");
                 }
+
+                *data.notify_role.lock().await = false;
             }
             None => {
                 error!("notify-empty: could not reach MC server");
@@ -367,14 +401,15 @@ async fn main() {
         mc_host: MC_HOST.to_string(),
         mc_port: MC_PORT,
         last_player_set: Mutex::new(HashSet::new()),
-        last_activity_message: Mutex::new(None)
+        last_activity_message: Mutex::new(None),
+        notify_role: Mutex::new(false)
     });
 
     let data_clone = data.clone();
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![players(), notify_empty()],
+            commands: vec![meme(), players(), notify_empty()],
             ..Default::default()
         })
         .setup(move |ctx, _ready, framework| {
