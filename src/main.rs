@@ -2,6 +2,7 @@ mod config;
 mod message_handler;
 mod message_flagger;
 mod cards;
+mod blackjack;
 
 use std::{
     collections::HashSet,
@@ -26,8 +27,8 @@ use futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
+use crate::blackjack::BlackJack;
 use crate::cards::{Card, Deck};
-use crate::message_handler::catch_msg;
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
@@ -53,6 +54,7 @@ struct Data {
     mc_port: u16,
     last_player_set: Mutex<HashSet<String>>,
     last_activity_message: Mutex<Option<serenity::MessageId>>,
+    black_jack: Mutex<Option<BlackJack>>,
     notify_role: Mutex<bool>,
 }
 
@@ -137,29 +139,50 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
     }
 }
 
-#[poise::command(slash_command)]
-async fn meme(ctx: Context<'_>) -> Result<(), Error> {
+#[poise::command(slash_command, rename = "play-blackjack")]
+async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usize) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let deck = Deck::new();
-    let msg = deck.render_all();
-    ctx.send(poise::CreateReply::default().content(msg)).await?;
+    let data= ctx.data();
+    let mut blackjack = data.black_jack.lock().await;
 
-    /*
-    let number = rand::random_range(1..1380);
+    if blackjack.is_none() {
+        let new_game = BlackJack::new(bet);
+        let msg = new_game.play();
+        ctx.send(poise::CreateReply::default().content(msg)).await?;
 
-    let extensions = ["png","jpg","jpeg","mkv","mov","webp","mp4"];
-    let mut msg = "".to_string();
+        *blackjack = Some(new_game);
+        Ok(())
 
-    for ext in extensions {
-        let meme_link = format!("[\u{2800}](https://memes.colon3.me/{:04}.{})", number, ext);
-        msg += &meme_link;
+    } else {
+        *blackjack = None;
+        Ok(())
     }
+}
 
-    ctx.send(poise::CreateReply::default().content(msg)).await?;
-    */
+#[poise::command(slash_command)]
+async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] action: String) -> Result<(), Error> {
+    ctx.defer().await?;
 
-    Ok(())
+    let data= ctx.data();
+    let mut blackjack = data.black_jack.lock().await;
+
+    if let Some(mut game) = blackjack.take() {
+        let msg = game.turn(&action);
+        ctx.send(poise::CreateReply::default().content(msg)).await?;
+
+        if game.is_playing {
+            *blackjack = Some(game);
+        } else {
+            *blackjack = None;
+        }
+
+        Ok(())
+
+    } else {
+        ctx.send(poise::CreateReply::default().content("use 'play-blackjack' to start a game")).await?;
+        Ok(())
+    }
 }
 
 #[poise::command(slash_command)]
@@ -411,14 +434,15 @@ async fn main() {
         mc_port: MC_PORT,
         last_player_set: Mutex::new(HashSet::new()),
         last_activity_message: Mutex::new(None),
-        notify_role: Mutex::new(false)
+        notify_role: Mutex::new(false),
+        black_jack: Mutex::new(None)
     });
 
     let data_clone = data.clone();
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![meme(), players(), notify_empty()],
+            commands: vec![play_blackjack(), blackjack(), players(), notify_empty()],
             ..Default::default()
         })
         .setup(move |ctx, _ready, framework| {
