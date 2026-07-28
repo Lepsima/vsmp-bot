@@ -29,8 +29,13 @@ impl BlackJack {
         }
     }
 
-    pub fn play(&self) -> String {
-        format!("Playing *blackjack* with a bet of: {}€\n{}", self.player_bet, self.display_state())
+    pub fn play(&mut self) -> String {
+        let bet = self.player_bet;
+        let display = self.display_state();
+
+        let mut out = format!("Playing *blackjack* with a bet of: {}€\n{}", bet, display);
+        out += self.check_end(false);
+        out
     }
 
     pub fn display_state(&self) -> String {
@@ -43,22 +48,23 @@ impl BlackJack {
         format!("{}\n{}\n{}\n{}\n", dv, dr, pv, pr)
     }
 
-    pub fn check_end(&mut self) -> &str {
+    pub fn check_end(&mut self, force: bool) -> &str {
         let player_value = self.player_hand.value();
         let dealer_value = self.dealer_hand.value();
-
-        if player_value < 21 && dealer_value < 21 {
-            return "";
-        }
 
         if (player_value > dealer_value && player_value <= 21) || dealer_value > 21 {
             // ADD self.player_bet
             self.is_playing = false;
             "\n You won!"
+        
+        } else if !force && player_value < 21 && dealer_value < 21 {
+            ""
+            
         } else if dealer_value > player_value {
             // SUBTRACT self.player_bet
             self.is_playing = false;
             "\n Dealer won!"
+
         } else {
             self.is_playing = false;
             "\n Push!"
@@ -113,7 +119,7 @@ impl BlackJack {
         }
 
         output += &self.display_state();
-        output += self.check_end();
+        output += self.check_end(true);
         output
     }
 }

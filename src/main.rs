@@ -142,7 +142,7 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
 #[poise::command(slash_command, rename = "play-blackjack")]
 async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usize) -> Result<(), Error> {
     ctx.defer().await?;
-    
+
     if ctx.channel_id().get() != 1526711423412211802 {
         ctx.send(poise::CreateReply::default().content("No blackjack here")).await?;
         return Ok(());
@@ -152,7 +152,7 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
     let mut blackjack = data.black_jack.lock().await;
 
     if blackjack.is_none() {
-        let new_game = BlackJack::new(bet);
+        let mut new_game = BlackJack::new(bet);
         let msg = new_game.play();
         ctx.send(poise::CreateReply::default().content(msg)).await?;
 

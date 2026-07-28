@@ -38,10 +38,7 @@ pub static RESPONSE_TABLE: &[(&str, &str)] = &[
     ("mrbreast", "https://cdn.discordapp.com/attachments/1489775819919327352/1531446248966455469/image.png?ex=6a693df6&is=6a67ec76&hm=1d6a9669d426408c7ba7be9ec3b18e715d64239d1d25fdebdec5bfc767b9f8e6&"),
     ("hotel", "some mf said \"hotel\""),
     ("fitness", "The FitnessGram Pacer Test is a multistage aerobic capacity test that progressively gets more difficult as it continues. The 20 meter pacer test will begin in 30 seconds. Line up at the start. The running speed starts slowly but gets faster each minute after you hear this signal bodeboop. A sing lap should be completed every time you hear this sound. ding Remember to run in a straight line and run as long as possible. The second time you fail to complete a lap before the sound, your test is over. The test will begin on the word start. On your mark. Get ready!… Start. ding"),
-    ("lepsima", ":3"),
-    ("play-jackblack", "chicken jockey"),
-    ("you're", "yr'oue"),
-    ("your", "you'r")
+    ("lepsima", ":3")
 
 ];
 
