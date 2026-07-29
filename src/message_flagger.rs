@@ -1,6 +1,8 @@
 use crate::config::{MISSPELLS_TABLE, RESPONSE_TABLE};
 use std::collections::HashSet;
 use std::sync::LazyLock;
+use config::BLACKJACK;
+use crate::config;
 
 pub struct Flags {
     flags: HashSet<u8>
@@ -16,13 +18,21 @@ impl Flags {
     pub fn has_misspell(&self) -> bool {
         self.has_flag(Self::MISSPELL.1)
     }
+    pub fn has_gambling(&self) -> bool {
+        self.has_flag(Self::GAMBLING.1)
+    }
+    pub fn has_jarvis(&self) -> bool {
+        self.has_flag(Self::JARVIS.1)
+    }
 
     pub const RESPONSE: (&str, u8) = ("response", 0);
     pub const MISSPELL: (&str, u8) = ("misspell", 1);
+    pub const GAMBLING: (&str, u8) = ("gambling", 2);
+    pub const JARVIS: (&str, u8) = ("jarvis", 3);
 }
 
 static FLAGS: &[&str] = &[
-    Flags::RESPONSE.0, Flags::MISSPELL.0
+    Flags::RESPONSE.0, Flags::MISSPELL.0, Flags::GAMBLING.0, Flags::JARVIS.0
 ];
 
 static FLAG_LIST: LazyLock<Vec<Vec<&str>>> = LazyLock::new(|| {
@@ -34,6 +44,8 @@ static FLAG_LIST: LazyLock<Vec<Vec<&str>>> = LazyLock::new(|| {
         .collect();
 
     array[1] = MISSPELLS_TABLE.to_vec();
+    array[2] = BLACKJACK.to_vec();
+    array[3] = vec!["jarvis", "jravis", "jarbis", "jabris"];
     array
 });
 

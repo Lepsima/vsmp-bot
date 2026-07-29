@@ -3,13 +3,14 @@ mod message_handler;
 mod message_flagger;
 mod cards;
 mod blackjack;
+mod poker;
 
 use std::{
     collections::HashSet,
     sync::Arc,
     time::Duration,
 };
-
+use std::collections::HashMap;
 use crate::{
     config::Dialogue,
     message_handler::handle_message
@@ -54,7 +55,7 @@ struct Data {
     mc_port: u16,
     last_player_set: Mutex<HashSet<String>>,
     last_activity_message: Mutex<Option<serenity::MessageId>>,
-    black_jack: Mutex<Option<BlackJack>>,
+    black_jack: Mutex<HashMap<u64, BlackJack>>,
     notify_role: Mutex<bool>,
 }
 
@@ -139,60 +140,69 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
     }
 }
 
+async fn send_ctx_reply(ctx: &Context<'_>, msg: &str) {
+    let _ = ctx.send(poise::CreateReply::default().content(msg)).await;
+}
+
 #[poise::command(slash_command, rename = "play-blackjack")]
 async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usize) -> Result<(), Error> {
     ctx.defer().await?;
 
-    if ctx.channel_id().get() != 1526711423412211802 {
-        ctx.send(poise::CreateReply::default().content("No blackjack here")).await?;
+    if is_blackjack_channel(&ctx) {
+        ctx.say("No blackjack here").await?;
         return Ok(());
     }
 
-    let data= ctx.data();
-    let mut blackjack = data.black_jack.lock().await;
-
-    if blackjack.is_none() {
-        let mut new_game = BlackJack::new(bet);
-        let msg = new_game.play();
-        ctx.send(poise::CreateReply::default().content(msg)).await?;
-
-        *blackjack = Some(new_game);
-        Ok(())
-
-    } else {
-        *blackjack = None;
-        Ok(())
+    let id = ctx.author().id.get();
+    let mut blackjacks = ctx.data().black_jack.lock().await;
+    if !blackjacks.contains_key(&id) {
+        blackjacks.insert(id, BlackJack::new());
     }
+
+    let blackjack = blackjacks.get_mut(&id).unwrap();
+    if !blackjack.is_playing {
+        let msg = blackjack.play(bet);
+        ctx.say(msg.as_str()).await?;
+    } else {
+        ctx.say("Already playing...").await?;
+    }
+
+    Ok(())
+}
+
+fn is_blackjack_channel(ctx: &Context<'_>) -> bool {
+    ctx.channel_id().get() != 1526711423412211802
 }
 
 #[poise::command(slash_command)]
 async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] action: String) -> Result<(), Error> {
     ctx.defer().await?;
 
-    if ctx.channel_id().get() != 1526711423412211802 {
-        ctx.send(poise::CreateReply::default().content("No blackjack here")).await?;
+    if is_blackjack_channel(&ctx) {
+        ctx.say("No blackjack here").await?;
         return Ok(());
     }
 
-    let data= ctx.data();
-    let mut blackjack = data.black_jack.lock().await;
+    let id = ctx.author().id.get();
+    let mut blackjacks = ctx.data().black_jack.lock().await;
 
-    if let Some(mut game) = blackjack.take() {
-        let msg = game.turn(&action);
-        ctx.send(poise::CreateReply::default().content(msg)).await?;
-
-        if game.is_playing {
-            *blackjack = Some(game);
-        } else {
-            *blackjack = None;
-        }
-
-        Ok(())
-
-    } else {
-        ctx.send(poise::CreateReply::default().content("use 'play-blackjack' to start a game")).await?;
-        Ok(())
+    if !blackjacks.contains_key(&id) {
+        ctx.say("use 'play-blackjack' to start a game").await?;
+        return Ok(());
     }
+
+    let blackjack = blackjacks.get_mut(&id).unwrap();
+    if !blackjack.is_playing {
+        ctx.say("use 'play-blackjack' to start a game").await?;
+        return Ok(());
+    }
+
+    ctx.say(blackjack.turn(&action)).await?;
+    if !blackjack.is_playing {
+        blackjack.clear();
+    }
+
+    Ok(())
 }
 
 #[poise::command(slash_command)]
@@ -445,7 +455,7 @@ async fn main() {
         last_player_set: Mutex::new(HashSet::new()),
         last_activity_message: Mutex::new(None),
         notify_role: Mutex::new(false),
-        black_jack: Mutex::new(None)
+        black_jack: Mutex::new(HashMap::new())
     });
 
     let data_clone = data.clone();
