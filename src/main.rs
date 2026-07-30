@@ -19,18 +19,23 @@ use crate::{
 
 use serenity::{
     async_trait,
-    model::channel::Message,
-    prelude::*
+    model::{
+        channel::Message,
+        application::{interaction::Interaction, component::ButtonStyle}
+    },
+    prelude::*,
+    builder::{CreateActionRow, CreateButton, EditMessage},
 };
 
 use bollard::{Docker, query_parameters::EventsOptionsBuilder};
 use craftping::tokio::ping;
 use futures_util::StreamExt;
+use poise::CreateReply;
 use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
+use serenity::all::{CreateActionRow, UserId};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
 use crate::blackjack::BlackJack;
-use crate::cards::{Card, Deck};
 use crate::data::ScoreDb;
 
 const MC_HOST: &str = "host.docker.internal";
@@ -143,8 +148,8 @@ fn create_embed(is_online: bool, desc: &str, color: u32) -> CreateEmbed {
     }
 }
 
-async fn send_ctx_reply(ctx: &Context<'_>, msg: &str) {
-    let _ = ctx.send(poise::CreateReply::default().content(msg)).await;
+fn is_blackjack_channel(ctx: &Context<'_>) -> bool {
+    ctx.channel_id().get() != GAMBLING_CHANNEL_ID
 }
 
 #[poise::command(slash_command, rename = "play-blackjack")]
@@ -174,16 +179,12 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
     let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
     if !blackjack.is_playing {
         let embed = blackjack.play(bet, &mut scores);
-        ctx.send(poise::CreateReply::default().embed(embed)).await?;
+        ctx.send(CreateReply::default().embed(embed)).await?;
     } else {
         ctx.say("Already playing...").await?;
     }
 
     Ok(())
-}
-
-fn is_blackjack_channel(ctx: &Context<'_>) -> bool {
-    ctx.channel_id().get() != GAMBLING_CHANNEL_ID
 }
 
 #[poise::command(slash_command)]
@@ -211,7 +212,16 @@ async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] 
 
     let mut scores = ctx.data().scores.lock().await;
     let embed = blackjack.turn(&action, &mut scores);
-    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+    let components = vec![
+        CreateActionRow::Buttons(vec![
+            CreateButton::new("hit").label("Hit").style(ButtonStyle::Primary),
+            CreateButton::new("std").label("Stand").style(ButtonStyle::Success),
+            CreateButton::new("dbl").label("Double").style(ButtonStyle::Danger),
+        ])
+    ];
+
+    ctx.send(CreateReply::default().embed(embed).components(components)).await?;
 
     if !blackjack.is_playing {
         blackjack.clear();
@@ -219,6 +229,50 @@ async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] 
 
     Ok(())
 }
+
+#[poise::command(slash_command, rename = "one-dolla")]
+async fn one_dolla(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+
+    let mut scores = ctx.data().scores.lock().await;
+    scores.set(ctx.author().id, 1);
+
+    let embed = CreateEmbed::new()
+        .title("Mrbeast free money")
+        .description("you have one(1) dolla")
+        .color(Color::GREEN);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+
+    let scores = ctx.data().scores.lock().await;
+    let mut names: String = "".to_string();
+    let mut number = 0;
+
+    let mut all: Vec<(UserId, i128)> = scores.all().collect();
+    all.sort_by(|a, b| b.1.cmp(&a.1));
+
+    for entry in all {
+        number += 1;
+        let user = entry.0.to_user(ctx.http()).await;
+        let name = user?.name;
+        names += &format!("-{}: {} has {} dolla\n", number, name, entry.1);
+    }
+
+    let embed = CreateEmbed::new()
+        .title("dolla Leaderboard")
+        .description(names)
+        .color(Color::BLUE);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
+    Ok(())
+}
+
 
 #[poise::command(slash_command)]
 async fn players(ctx: Context<'_>) -> Result<(), Error> {
@@ -230,7 +284,7 @@ async fn players(ctx: Context<'_>) -> Result<(), Error> {
         None => embed_players_offline(),
     };
 
-    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+    ctx.send(CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 
@@ -353,6 +407,12 @@ async fn task_check_players(ctx: serenity::Context, data: Arc<Data>) {
     }
 }
 
+pub fn catch_msg(res: serenity::Result<Message>) {
+    if let Err(why) = res {
+        println!("Error sending message: {why:?}");
+    }
+}
+
 /// Listens to Docker container events for start/die on the MC container.
 async fn task_docker_events(ctx: serenity::Context, data: Arc<Data>) {
     let docker = match Docker::connect_with_socket_defaults() {
@@ -448,9 +508,62 @@ impl EventHandler for Handler {
         tokio::spawn(task_check_players(ctx.clone(), self.data.clone()));
         tokio::spawn(task_docker_events(ctx.clone(), self.data.clone()));
     }
-}
 
-// ========== MAIN ==========
+    async fn interaction_create(&self, ctx: serenity::Context, interaction: Interaction) {
+        if let Interaction::Component(component) = interaction {
+            let id = component.data.custom_id.as_str();
+            if !matches!(id, "hit" | "std" | "dbl") {
+                return;
+            }
+
+            component.defer(&ctx).await.unwrap();
+
+            let user_id = component.user.id;
+            let mut blackjacks = self.data.black_jack.lock().await;
+
+            if !blackjacks.contains_key(&user_id.get()) {
+                let reply = "use 'play-blackjack' to start a game";
+                catch_msg(component.channel_id.say(&ctx.http, reply).await);
+                return;
+            }
+
+            let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
+            if !blackjack.is_playing {
+                let reply = "use 'play-blackjack' to start a game";
+                catch_msg(component.channel_id.say(&ctx.http, reply).await);
+                return;
+            }
+
+            let action;
+            match id {
+                "hit" => { action = "hit" }
+                "std" => { action = "stand" }
+                "dbl" => { action = "double down" }
+                _ => {}
+            }
+
+            let mut scores = self.data.scores.lock().await;
+            let embed = blackjack.turn(&action, &mut scores);
+
+            let components = vec![
+                CreateActionRow::Buttons(vec![
+                    CreateButton::new("hit").label("Hit").style(ButtonStyle::Primary),
+                    CreateButton::new("std").label("Stand").style(ButtonStyle::Success),
+                    CreateButton::new("dbl").label("Double").style(ButtonStyle::Danger),
+                ])
+            ];
+
+            component.message.clone().edit(&ctx, EditMessage::new()
+                .embed(embed)
+                .components(vec![])
+            ).await.unwrap();
+
+            if !blackjack.is_playing {
+                blackjack.clear();
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -478,7 +591,7 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![play_blackjack(), blackjack(), players(), notify_empty()],
+            commands: vec![one_dolla(), leaderboard(), play_blackjack(), blackjack(), players(), notify_empty()],
             ..Default::default()
         })
         .setup(move |ctx, _ready, framework| {

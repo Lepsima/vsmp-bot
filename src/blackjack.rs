@@ -40,12 +40,13 @@ impl BlackJack {
 
     pub fn complete_bet(&mut self, is_player_winner: bool, score: &mut MutexGuard<ScoreDb>) -> usize {
         let bet = self.player_bet;
+
         let diff = if !is_player_winner {
             -(bet as i128)
         } else if !BlackJack::is_blackjack(&self.player_hand) {
             bet as i128
         } else {
-            (self.player_bet as f64 * 1.5) as i128
+            (bet as f64 * 1.5) as i128
         };
 
         let curr_score = score.get(self.user_id) + diff;
@@ -70,28 +71,27 @@ impl BlackJack {
 
         let player_value = self.player_hand.value();
         let dealer_value = self.dealer_hand.value();
+        let color;
 
         let outcome = if player_value == 21 && dealer_value != 21 {
             let bet = self.complete_bet(true, score);
+            color = Color::GREEN;
             &format!("You won {} dolla!", bet)
 
         } else if dealer_value == 21 && player_value != 21 {
             let bet = self.complete_bet(false, score);
+            color = Color::RED;
             &format!("You lost {} dolla!", bet)
 
         } else if player_value == 21 && player_value == dealer_value {
+            color = Color::BLUE;
             "Push!"
         } else {
+            color = Color::BLUE;
             self.is_playing = true;
             &format!("Playing with a bet of: {} dolla", bet)
         };
-
-        let color = if self.is_playing {
-            Color::GREEN
-        } else {
-            Color::RED
-        };
-
+        
         CreateEmbed::new()
             .title(outcome)
             .description(self.display_state())

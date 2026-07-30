@@ -2,12 +2,7 @@ use crate::config::{JARVIS_RESPONSE_TABLE, MISSPELLS_TABLE, RESPONSE_TABLE};
 use crate::message_flagger::get_message_flags;
 use serenity::all::Message;
 use serenity::client::Context;
-
-pub fn catch_msg(res: serenity::Result<Message>) {
-    if let Err(why) = res {
-        println!("Error sending message: {why:?}");
-    }
-}
+use crate::catch_msg;
 
 pub async fn handle_message(ctx: Context, msg: Message) {
     let text_lc = msg.content.to_lowercase();
