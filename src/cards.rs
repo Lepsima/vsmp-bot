@@ -17,31 +17,33 @@ impl Pack {
         self.codes.len() * self.suits.len()
     }
 
-    pub fn get_value(&self, value: u8) -> u8 {
+    pub fn get_code(&self, value: u8) -> u8 {
         self.codes[value as usize]
     }
 
     pub fn get_suit(&self, suit: u8) -> char {
-        self.suits[suit as usize] as char
+        self.suits[suit as usize]
     }
 }
 
 #[derive(Copy, Clone)]
 pub struct Card {
-    pub value: u8,
+    value: u8,
+    pub code: u8,
     pub suit: char,
 }
 
 impl Card {
     pub fn new(value: u8, suit: u8, pack: &Pack) -> Card {
         Card {
-            value: pack.get_value(value),
+            value,
+            code: pack.get_code(value),
             suit: pack.get_suit(suit)
         }
     }
 
     pub fn empty() -> Card {
-        Card { value: 0, suit: ' ' }
+        Card { value: 0, code: 0, suit: ' ' }
     }
 
     pub fn get_value(&self) -> u8 {
@@ -91,7 +93,7 @@ impl Card {
                 lines[2] += "└───┘";
 
             } else {
-                let code = card.value as char;
+                let code = card.code as char;
                 let number = if code == '0' { "10" } else { &code.to_string() };
 
                 lines[0] += &format!("┌──{:─>2}", number);

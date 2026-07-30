@@ -38,7 +38,7 @@ const MC_PORT: u16 = 25565;
 const MC_CONTAINER_NAME: &str = "purpur";
 const STATUS_CHANNEL_ID: u64 = 1482111537127620608;
 const ACTIVITY_CHANNEL_ID: u64 = 1482122160930689216;
-const GAMBLING_CHANNEL_ID: u64 = 1482122160930689216;
+const GAMBLING_CHANNEL_ID: u64 = 1526711423412211802;
 
 struct Color;
 
@@ -65,7 +65,6 @@ struct Data {
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Arc<Data>, Error>;
-
 
 struct McStatus {
     online: usize,
@@ -157,15 +156,24 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
         return Ok(());
     }
 
-    let id = ctx.author().id.get();
-    let mut blackjacks = ctx.data().black_jack.lock().await;
-    if !blackjacks.contains_key(&id) {
-        blackjacks.insert(id, BlackJack::new());
+    let mut scores = ctx.data().scores.lock().await;
+    let user_id = ctx.author().id;
+
+    let score = scores.get(user_id);
+    if (bet as i128) > score {
+        ctx.say(format!("Insufficient dolla, current amount: {}", score)).await?;
+        return Ok(());
     }
 
-    let blackjack = blackjacks.get_mut(&id).unwrap();
+    let bet = usize::min(score as usize, bet);
+    let mut blackjacks = ctx.data().black_jack.lock().await;
+    if !blackjacks.contains_key(&user_id.get()) {
+        blackjacks.insert(user_id.get(), BlackJack::new(&user_id));
+    }
+
+    let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
     if !blackjack.is_playing {
-        let embed = blackjack.play(bet);
+        let embed = blackjack.play(bet, &mut scores);
         ctx.send(poise::CreateReply::default().embed(embed)).await?;
     } else {
         ctx.say("Already playing...").await?;
@@ -187,21 +195,22 @@ async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] 
         return Ok(());
     }
 
-    let id = ctx.author().id.get();
+    let user_id = ctx.author().id;
     let mut blackjacks = ctx.data().black_jack.lock().await;
 
-    if !blackjacks.contains_key(&id) {
+    if !blackjacks.contains_key(&user_id.get()) {
         ctx.say("use 'play-blackjack' to start a game").await?;
         return Ok(());
     }
 
-    let blackjack = blackjacks.get_mut(&id).unwrap();
+    let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
     if !blackjack.is_playing {
         ctx.say("use 'play-blackjack' to start a game").await?;
         return Ok(());
     }
 
-    let embed = blackjack.turn(&action);
+    let mut scores = ctx.data().scores.lock().await;
+    let embed = blackjack.turn(&action, &mut scores);
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
 
     if !blackjack.is_playing {
@@ -285,6 +294,14 @@ async fn task_check_players(ctx: serenity::Context, data: Arc<Data>) {
             None => continue,
         };
 
+        ctx.set_presence(
+            Some(serenity::ActivityData::playing(format!(
+                "{} players online",
+                status.online
+            ))),
+            serenity::OnlineStatus::Online,
+        );
+
         if status.online < 3 || status.players.is_empty() {
             *data.last_player_set.lock().await = HashSet::new();
             continue;
@@ -333,14 +350,6 @@ async fn task_check_players(ctx: serenity::Context, data: Arc<Data>) {
             }
             Err(e) => error!("Failed to send activity embed: {e}"),
         }
-
-        ctx.set_presence(
-            Some(serenity::ActivityData::playing(format!(
-                "{} players online",
-                status.online
-            ))),
-            serenity::OnlineStatus::Online,
-        );
     }
 }
 
@@ -354,7 +363,7 @@ async fn task_docker_events(ctx: serenity::Context, data: Arc<Data>) {
         }
     };
 
-    let mut filters = std::collections::HashMap::new();
+    let mut filters = HashMap::new();
     filters.insert("container", vec![MC_CONTAINER_NAME]);
     filters.insert("type", vec!["container"]);
 
@@ -462,7 +471,7 @@ async fn main() {
         last_activity_message: Mutex::new(None),
         notify_role: Mutex::new(false),
         black_jack: Mutex::new(HashMap::new()),
-        scores: Mutex::new(ScoreDb::open("./data/scores").expect("Failed to open score DB")),
+        scores: Mutex::new(ScoreDb::open("./data/scores")),
     });
 
     let data_clone = data.clone();

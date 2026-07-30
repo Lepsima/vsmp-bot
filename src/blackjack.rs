@@ -1,21 +1,26 @@
-use serenity::all::CreateEmbed;
+use poise::serenity_prelude;
 use crate::cards::{Deck, Pack};
+use crate::data::ScoreDb;
 use crate::Color;
+use serenity::all::{CreateEmbed, UserId};
+use tokio::sync::MutexGuard;
 
 pub struct BlackJack {
+    pub is_playing: bool,
+    player_bet: usize,
+    user_id: UserId,
+
     deck: Deck,
     player_hand: Deck,
     dealer_hand: Deck,
-
-    player_bet: usize,
-    pub is_playing: bool,
 }
 
 impl BlackJack {
-    pub fn new() -> BlackJack {
+    pub fn new(user: &UserId) -> BlackJack {
         BlackJack {
             is_playing: false,
             player_bet: 0,
+            user_id: user.clone(),
             deck: Deck::empty(),
             player_hand: Deck::empty(),
             dealer_hand: Deck::empty()
@@ -23,37 +28,42 @@ impl BlackJack {
     }
 
     pub fn clear(&mut self) {
-        *self = BlackJack::new();
+        self.is_playing = false;
+        self.player_bet = 0;
+        self.player_hand = Deck::empty();
+        self.dealer_hand = Deck::empty();
     }
 
     pub fn is_blackjack(deck: &Deck) -> bool {
         deck.value() == 21 && deck.cards.len() == 2
     }
 
-    pub fn complete_bet(&mut self, is_player_winner: bool) -> usize {
-        let mut bet = self.player_bet;
-        self.player_bet = 0;
-
-        if is_player_winner {
-            if BlackJack::is_blackjack(&self.player_hand) {
-                bet = (bet as f64 * 1.5) as usize
-            }
-
-            // ADD <bet>
+    pub fn complete_bet(&mut self, is_player_winner: bool, score: &mut MutexGuard<ScoreDb>) -> usize {
+        let bet = self.player_bet;
+        let diff = if !is_player_winner {
+            -(bet as i128)
+        } else if !BlackJack::is_blackjack(&self.player_hand) {
+            bet as i128
         } else {
-            // SUBTRACT <bet>
-        }
+            (self.player_bet as f64 * 1.5) as i128
+        };
 
+        let curr_score = score.get(self.user_id) + diff;
+        let _ = score.set(self.user_id, curr_score);
+        self.player_bet = 0;
         bet
     }
 
-    pub fn play(&mut self, bet: usize) -> CreateEmbed {
-
+    pub fn play(&mut self, bet: usize, score: &mut MutexGuard<ScoreDb>) -> CreateEmbed {
         self.player_bet = bet;
         self.is_playing = false;
 
-        self.deck = Deck::decks(4, &Pack::blackjack());
-        self.deck.shuffle();
+        let footer = if self.deck.cards.len() < 15 {
+            self.deck = Deck::decks(4, &Pack::blackjack());
+            self.deck.shuffle();
+
+            "Deck has been re-shuffled!"
+        } else { "" };
 
         self.player_hand = Deck::from(2, &mut self.deck);
         self.dealer_hand = Deck::from(2, &mut self.deck);
@@ -62,11 +72,11 @@ impl BlackJack {
         let dealer_value = self.dealer_hand.value();
 
         let outcome = if player_value == 21 && dealer_value != 21 {
-            let bet = self.complete_bet(true);
+            let bet = self.complete_bet(true, score);
             &format!("You won {} dolla!", bet)
 
         } else if dealer_value == 21 && player_value != 21 {
-            let bet = self.complete_bet(false);
+            let bet = self.complete_bet(false, score);
             &format!("You lost {} dolla!", bet)
 
         } else if player_value == 21 && player_value == dealer_value {
@@ -86,6 +96,7 @@ impl BlackJack {
             .title(outcome)
             .description(self.display_state())
             .color(color)
+            .footer(serenity_prelude::CreateEmbedFooter::new(footer))
     }
 
     pub fn display_state(&self) -> String {
@@ -95,7 +106,7 @@ impl BlackJack {
         format!("\n{}{}\n", dr, pr)
     }
 
-    pub fn turn(&mut self, action: &str) -> CreateEmbed {
+    pub fn turn(&mut self, action: &str, score: &mut MutexGuard<ScoreDb>) -> CreateEmbed {
         if !self.is_playing {
             return CreateEmbed::new()
                 .title("Error")
@@ -103,7 +114,6 @@ impl BlackJack {
                 .color(Color::RED);
         }
 
-        let mut output = "".to_string();
         let mut is_player_busted = false;
 
         match action {
@@ -134,7 +144,7 @@ impl BlackJack {
 
         if is_player_busted {
             let display = self.display_state();
-            let bet = self.complete_bet(false);
+            let bet = self.complete_bet(false, score);
 
             return CreateEmbed::new()
                 .title(format!("You busted, lost {} dolla", bet))
@@ -160,12 +170,12 @@ impl BlackJack {
 
         let outcome = if (player_value > dealer_value && player_value <= 21) || dealer_value > 21 {
             color = Color::GREEN;
-            let bet = self.complete_bet(true);
+            let bet = self.complete_bet(true, score);
             &format!("You won {} dolla!", bet)
 
         } else if dealer_value > player_value {
             color = Color::RED;
-            let bet = self.complete_bet(false);
+            let bet = self.complete_bet(false, score);
             &format!("You lost {} dolla!", bet)
 
         } else {
