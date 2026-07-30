@@ -4,6 +4,7 @@ mod message_flagger;
 mod cards;
 mod blackjack;
 mod poker;
+mod data;
 
 use std::{
     collections::HashSet,
@@ -30,12 +31,14 @@ use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
 use crate::blackjack::BlackJack;
 use crate::cards::{Card, Deck};
+use crate::data::ScoreDb;
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
 const MC_CONTAINER_NAME: &str = "purpur";
 const STATUS_CHANNEL_ID: u64 = 1482111537127620608;
 const ACTIVITY_CHANNEL_ID: u64 = 1482122160930689216;
+const GAMBLING_CHANNEL_ID: u64 = 1482122160930689216;
 
 struct Color;
 
@@ -57,6 +60,7 @@ struct Data {
     last_activity_message: Mutex<Option<serenity::MessageId>>,
     black_jack: Mutex<HashMap<u64, BlackJack>>,
     notify_role: Mutex<bool>,
+    scores: Mutex<ScoreDb>,
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -161,8 +165,8 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
 
     let blackjack = blackjacks.get_mut(&id).unwrap();
     if !blackjack.is_playing {
-        let msg = blackjack.play(bet);
-        ctx.say(msg.as_str()).await?;
+        let embed = blackjack.play(bet);
+        ctx.send(poise::CreateReply::default().embed(embed)).await?;
     } else {
         ctx.say("Already playing...").await?;
     }
@@ -171,7 +175,7 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
 }
 
 fn is_blackjack_channel(ctx: &Context<'_>) -> bool {
-    ctx.channel_id().get() != 1526711423412211802
+    ctx.channel_id().get() != GAMBLING_CHANNEL_ID
 }
 
 #[poise::command(slash_command)]
@@ -197,7 +201,9 @@ async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] 
         return Ok(());
     }
 
-    ctx.say(blackjack.turn(&action)).await?;
+    let embed = blackjack.turn(&action);
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
     if !blackjack.is_playing {
         blackjack.clear();
     }
@@ -455,7 +461,8 @@ async fn main() {
         last_player_set: Mutex::new(HashSet::new()),
         last_activity_message: Mutex::new(None),
         notify_role: Mutex::new(false),
-        black_jack: Mutex::new(HashMap::new())
+        black_jack: Mutex::new(HashMap::new()),
+        scores: Mutex::new(ScoreDb::open("./data/scores").expect("Failed to open score DB")),
     });
 
     let data_clone = data.clone();
