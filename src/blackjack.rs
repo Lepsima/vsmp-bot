@@ -1,8 +1,8 @@
 use poise::serenity_prelude;
 use crate::cards::{Deck, Pack};
 use crate::data::ScoreDb;
-use crate::Color;
-use serenity::all::{CreateEmbed, UserId};
+use crate::{catch_msg, Color, Handler};
+use serenity::all::{ButtonStyle, ComponentInteraction, Context, CreateActionRow, CreateButton, CreateEmbed, EditMessage, UserId};
 use tokio::sync::MutexGuard;
 
 pub struct BlackJack {
@@ -25,6 +25,49 @@ impl BlackJack {
             player_hand: Deck::empty(),
             dealer_hand: Deck::empty()
         }
+    }
+
+    pub fn get_components(id: &UserId) -> Vec<CreateActionRow> {
+        let id_str = id.to_string();
+        vec![
+            CreateActionRow::Buttons(vec![
+                CreateButton::new(id_str.clone() + "|hit").label("Hit").style(ButtonStyle::Primary),
+                CreateButton::new(id_str.clone() + "|stand").label("Stand").style(ButtonStyle::Secondary),
+                CreateButton::new(id_str + "|double down").label("Double").style(ButtonStyle::Danger),
+            ])
+        ]
+    }
+
+    pub async fn handle_interaction(handler: &Handler, component: &ComponentInteraction,
+                                    ctx: &Context, action: &str)
+    {
+        let user_id = component.user.id;
+        let mut blackjacks = handler.data.black_jack.lock().await;
+
+        if blackjacks.contains_key(&user_id.get()) {
+            let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
+            let mut edit_message = EditMessage::new();
+            let mut message = component.message.clone();
+
+            if blackjack.is_playing {
+                let mut scores = handler.data.scores.lock().await;
+
+                edit_message = edit_message
+                    .embed(blackjack.turn(&action, &mut scores))
+                    .components(BlackJack::get_components(&user_id));
+            }
+
+            if !blackjack.is_playing  {
+                blackjack.clear();
+                edit_message = edit_message.components(vec![]);
+            }
+
+            message.edit(&ctx, edit_message).await.unwrap();
+            return;
+        }
+
+        let reply = "use 'blackjack' to start a game";
+        catch_msg(component.channel_id.say(&ctx.http, reply).await);
     }
 
     pub fn clear(&mut self) {
@@ -91,7 +134,7 @@ impl BlackJack {
             self.is_playing = true;
             &format!("Playing with a bet of: {} dolla", bet)
         };
-        
+
         CreateEmbed::new()
             .title(outcome)
             .description(self.display_state())

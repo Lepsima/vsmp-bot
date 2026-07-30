@@ -6,37 +6,31 @@ mod blackjack;
 mod poker;
 mod data;
 
+use crate::{
+    config::Dialogue,
+    message_handler::handle_message,
+    blackjack::BlackJack,
+    data::ScoreDb
+};
+
 use std::{
-    collections::HashSet,
+    collections::{HashSet, HashMap},
     sync::Arc,
     time::Duration,
 };
-use std::collections::HashMap;
-use crate::{
-    config::Dialogue,
-    message_handler::handle_message
-};
 
-use serenity::{
-    async_trait,
-    model::{
-        channel::Message,
-        application::{interaction::Interaction, component::ButtonStyle}
-    },
-    prelude::*,
-    builder::{CreateActionRow, CreateButton, EditMessage},
-};
-
-use bollard::{Docker, query_parameters::EventsOptionsBuilder};
+use bollard::{query_parameters::EventsOptionsBuilder, Docker};
 use craftping::tokio::ping;
 use futures_util::StreamExt;
+use poise::serenity_prelude::{self as serenity};
 use poise::CreateReply;
-use poise::serenity_prelude::{self as serenity, ChannelId, CreateEmbed};
-use serenity::all::{CreateActionRow, UserId};
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::{error, info};
-use crate::blackjack::BlackJack;
-use crate::data::ScoreDb;
+
+use serenity::all::{
+    async_trait, Interaction, prelude::*,
+    ChannelId, CreateEmbed, UserId, Message,
+};
 
 const MC_HOST: &str = "host.docker.internal";
 const MC_PORT: u16 = 25565;
@@ -152,8 +146,8 @@ fn is_blackjack_channel(ctx: &Context<'_>) -> bool {
     ctx.channel_id().get() != GAMBLING_CHANNEL_ID
 }
 
-#[poise::command(slash_command, rename = "play-blackjack")]
-async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usize) -> Result<(), Error> {
+#[poise::command(slash_command)]
+async fn blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usize) -> Result<(), Error> {
     ctx.defer().await?;
 
     if is_blackjack_channel(&ctx) {
@@ -179,52 +173,12 @@ async fn play_blackjack(ctx: Context<'_>, #[description = "Bet amount"] bet: usi
     let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
     if !blackjack.is_playing {
         let embed = blackjack.play(bet, &mut scores);
-        ctx.send(CreateReply::default().embed(embed)).await?;
+        ctx.send(CreateReply::default()
+            .embed(embed)
+            .components(BlackJack::get_components(&user_id))
+        ).await?;
     } else {
         ctx.say("Already playing...").await?;
-    }
-
-    Ok(())
-}
-
-#[poise::command(slash_command)]
-async fn blackjack(ctx: Context<'_>, #[description = "hit, stand, double down"] action: String) -> Result<(), Error> {
-    ctx.defer().await?;
-
-    if is_blackjack_channel(&ctx) {
-        ctx.say("No blackjack here").await?;
-        return Ok(());
-    }
-
-    let user_id = ctx.author().id;
-    let mut blackjacks = ctx.data().black_jack.lock().await;
-
-    if !blackjacks.contains_key(&user_id.get()) {
-        ctx.say("use 'play-blackjack' to start a game").await?;
-        return Ok(());
-    }
-
-    let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
-    if !blackjack.is_playing {
-        ctx.say("use 'play-blackjack' to start a game").await?;
-        return Ok(());
-    }
-
-    let mut scores = ctx.data().scores.lock().await;
-    let embed = blackjack.turn(&action, &mut scores);
-
-    let components = vec![
-        CreateActionRow::Buttons(vec![
-            CreateButton::new("hit").label("Hit").style(ButtonStyle::Primary),
-            CreateButton::new("std").label("Stand").style(ButtonStyle::Success),
-            CreateButton::new("dbl").label("Double").style(ButtonStyle::Danger),
-        ])
-    ];
-
-    ctx.send(CreateReply::default().embed(embed).components(components)).await?;
-
-    if !blackjack.is_playing {
-        blackjack.clear();
     }
 
     Ok(())
@@ -511,55 +465,24 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: serenity::Context, interaction: Interaction) {
         if let Interaction::Component(component) = interaction {
-            let id = component.data.custom_id.as_str();
-            if !matches!(id, "hit" | "std" | "dbl") {
-                return;
-            }
-
             component.defer(&ctx).await.unwrap();
 
-            let user_id = component.user.id;
-            let mut blackjacks = self.data.black_jack.lock().await;
+            let custom_id = component.data.custom_id.as_str();
+            let Some((owner_id, btn)) = custom_id.split_once('|') else {
+                return
+            };
 
-            if !blackjacks.contains_key(&user_id.get()) {
-                let reply = "use 'play-blackjack' to start a game";
-                catch_msg(component.channel_id.say(&ctx.http, reply).await);
+            let owner_id: u64 = match owner_id.parse() {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+
+            if component.user.id.get() != owner_id {
                 return;
             }
 
-            let blackjack = blackjacks.get_mut(&user_id.get()).unwrap();
-            if !blackjack.is_playing {
-                let reply = "use 'play-blackjack' to start a game";
-                catch_msg(component.channel_id.say(&ctx.http, reply).await);
-                return;
-            }
-
-            let action;
-            match id {
-                "hit" => { action = "hit" }
-                "std" => { action = "stand" }
-                "dbl" => { action = "double down" }
-                _ => {}
-            }
-
-            let mut scores = self.data.scores.lock().await;
-            let embed = blackjack.turn(&action, &mut scores);
-
-            let components = vec![
-                CreateActionRow::Buttons(vec![
-                    CreateButton::new("hit").label("Hit").style(ButtonStyle::Primary),
-                    CreateButton::new("std").label("Stand").style(ButtonStyle::Success),
-                    CreateButton::new("dbl").label("Double").style(ButtonStyle::Danger),
-                ])
-            ];
-
-            component.message.clone().edit(&ctx, EditMessage::new()
-                .embed(embed)
-                .components(vec![])
-            ).await.unwrap();
-
-            if !blackjack.is_playing {
-                blackjack.clear();
+            if matches!(btn, "hit" | "stand" | "double down") {
+                BlackJack::handle_interaction(self, &component, &ctx, btn).await;
             }
         }
     }
@@ -591,7 +514,7 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![one_dolla(), leaderboard(), play_blackjack(), blackjack(), players(), notify_empty()],
+            commands: vec![one_dolla(), leaderboard(), blackjack(), players(), notify_empty()],
             ..Default::default()
         })
         .setup(move |ctx, _ready, framework| {
