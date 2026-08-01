@@ -1,11 +1,26 @@
+use crate::catch_msg;
 use crate::config::{JARVIS_RESPONSE_TABLE, MISSPELLS_TABLE, RESPONSE_TABLE};
 use crate::message_flagger::get_message_flags;
-use serenity::all::Message;
+use serenity::all::{Message, RoleId};
 use serenity::client::Context;
-use crate::catch_msg;
 
 pub async fn handle_message(ctx: Context, msg: Message) {
     let text_lc = msg.content.to_lowercase();
+
+    if text_lc.starts_with("!events") {
+        let guild_id = msg.guild_id.unwrap();
+        let mut member = guild_id.member(&ctx, msg.author.id).await.unwrap();
+        let role_id = RoleId::new(1530252131045478411);
+
+        if member.roles.contains(&role_id) {
+            member.remove_role(&ctx, role_id).await.unwrap();
+            catch_msg(msg.channel_id.say(&ctx.http, "Events role removed").await);
+        } else {
+            member.add_role(&ctx, role_id).await.unwrap();
+            catch_msg(msg.channel_id.say(&ctx.http, "Events role added").await);
+        }
+    }
+
     let flags = get_message_flags(&text_lc);
     let mut count = 3;
 

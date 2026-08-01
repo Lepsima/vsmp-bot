@@ -36,12 +36,14 @@ pub static RESPONSE_TABLE: &[(&str, &str)] = &[
     ("hotel", "some mf said \"hotel\""),
     ("trivago", "hotel"),
     ("fitness", "The FitnessGram Pacer Test is a multistage aerobic capacity test that progressively gets more difficult as it continues. The 20 meter pacer test will begin in 30 seconds. Line up at the start. The running speed starts slowly but gets faster each minute after you hear this signal bodeboop. A sing lap should be completed every time you hear this sound. ding Remember to run in a straight line and run as long as possible. The second time you fail to complete a lap before the sound, your test is over. The test will begin on the word start. On your mark. Get ready!… Start. ding"),
-    ("lepsima", ":3")
+    ("lepsima", ":3"),
+    ("waiting~", "can you be a NORMAL human being for ONE day in your fucking life i can't believe how genuinely DASTARDLY and BONKERS this HORRENDOUS message is. you don't deserve to be ALIVE which is why we are going to KILL you with NO euphemisms because you apparently can't HANDLE that you FUCKING DUMBASS THRICE-GALBLADDERED IDIOT who can't handle a single FUCKING message without making it into some sort of HORRIBLE VEXA-DEFYING HEARSAY that can only be produced by a WRITHING MAGGOT like yourself you BLUNDERING BUFFOON"),
+    
 
 ];
 
 pub static MISSPELLS_TABLE: &[&str] = &[
-    "lamo", "ahr", "forgor", "qoute", "akward", "mincrefart", "tits"
+    "lamo", "ahr", "forgor", "qoute", "akward", "mincrefart", "tits", "boobs"
 ];
 
 pub static BLACKJACK: &[&str] = &[
@@ -50,6 +52,7 @@ pub static BLACKJACK: &[&str] = &[
 
 pub static JARVIS_RESPONSE_TABLE: &[(&str, &str)] = &[
     (":3", ":3"),
+    ("i agree", "i agree"),
     ("hotel", "trivago"),
     ("crazy", "Crazy?"),
     ("jork it a little", "excuse me"),
